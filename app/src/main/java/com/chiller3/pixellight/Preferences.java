@@ -19,6 +19,8 @@ public class Preferences {
     private static final String PREF_SCREEN_COLOR = "screen_color";
     private static final String PREF_SCREEN_MODE = "screen_mode";
     private static final String PREF_HAPTICS = "haptics";
+    private static final String PREF_REAR_LED = "rear_led";
+    private static final String PREF_REAR_LED_BRIGHTNESS = "rear_led_brightness";
     private static final String PREF_VOLUME_KEYS = "volume_keys";
 
     private final SharedPreferences prefs;
@@ -86,6 +88,22 @@ public class Preferences {
 
     public void setScreenMode(int mode) {
         prefs.edit().putInt(PREF_SCREEN_MODE, mode).apply();
+    }
+
+    public boolean getRearLed() {
+        return prefs.getBoolean(PREF_REAR_LED, false);
+    }
+
+    public void setRearLed(boolean enabled) {
+        prefs.edit().putBoolean(PREF_REAR_LED, enabled).apply();
+    }
+
+    public int getRearLedBrightness() {
+        return prefs.getInt(PREF_REAR_LED_BRIGHTNESS, 100);
+    }
+
+    public void setRearLedBrightness(int value) {
+        prefs.edit().putInt(PREF_REAR_LED_BRIGHTNESS, value).apply();
     }
 
     public boolean getHaptics() {

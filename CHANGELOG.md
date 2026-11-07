@@ -7,6 +7,15 @@
     to update the actual links at the bottom of the file.
 -->
 
+### Version 2.10-plus
+
+* Rear RGB LEDs: Color light can now drive the Pixel 11 Pro "HiLight" RGB ring around the flash in any color, including Rainbow / Strobe / SOS modes
+  * Google does not let regular apps control these LEDs, so this requires Shizuku (free; started with Wireless debugging, again after each reboot). The app walks you through setup.
+  * The white flashlight itself cannot change color. The colors come from the small LED ring, so it is a colored glow rather than flashlight brightness.
+  * For safety, the LEDs dim to 55% after 10 seconds and turn off after 5 minutes, and they are always released back to the system when you leave the screen.
+  * Approach based on the MIT-licensed HiLight Studio and Essentials projects.
+* Screen light is now called Color light, and its controls stay visible longer
+
 ### Version 2.9-plus
 
 Crash fixes:

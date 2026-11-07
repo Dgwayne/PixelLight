@@ -1,10 +1,13 @@
 [versions]
 android-gradle-plugin = "9.4.0"
 jgit = "7.8.0.202609011348-r"
+shizuku = "13.1.5"
 
 [libraries]
 jgit = { group = "org.eclipse.jgit", name = "org.eclipse.jgit", version.ref = "jgit" }
 jgit-archive = { group = "org.eclipse.jgit", name = "org.eclipse.jgit.archive", version.ref = "jgit" }
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "android-gradle-plugin" }

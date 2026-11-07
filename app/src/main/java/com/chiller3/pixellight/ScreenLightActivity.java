@@ -5,6 +5,10 @@
 package com.chiller3.pixellight;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.net.Uri;
+import android.widget.Toast;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -32,13 +36,13 @@ import com.chiller3.pixellight.databinding.ScreenLightActivityBinding;
  * Full-screen colored light using the display. Useful as a soft fill light, a night-vision red
  * light, or a signal light, and works even when the camera flash is busy or too hot.
  */
-public class ScreenLightActivity extends Activity {
+public class ScreenLightActivity extends Activity implements RgbLed.Listener {
     private static final int MODE_STEADY = 0;
     private static final int MODE_RAINBOW = 1;
     private static final int MODE_STROBE = 2;
     private static final int MODE_SOS = 3;
 
-    private static final long CONTROLS_TIMEOUT_MS = 5000;
+    private static final long CONTROLS_TIMEOUT_MS = 8000;
     private static final long RAINBOW_TICK_MS = 40;
     private static final long STROBE_HALF_PERIOD_MS = 100;
     private static final long SOS_UNIT_MS = 200;
@@ -84,6 +88,10 @@ public class ScreenLightActivity extends Activity {
     private boolean effectLit = true;
     private int sosIndex = 0;
     private TextView[] modeViews;
+    private RgbLed rgbLed;
+    private boolean rearEnabled = false;
+    private boolean resumed = false;
+    private boolean updatingSwitch = false;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -121,6 +129,7 @@ public class ScreenLightActivity extends Activity {
         setupHue();
         setupBrightness();
         setupModes();
+        setupRear();
 
         color = prefs.getScreenColor(COLORS[1]);
         // Never start in a flashing mode.
@@ -136,19 +145,179 @@ public class ScreenLightActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         restartEffect();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        resumed = false;
         handler.removeCallbacks(effectRunnable);
+        // Never leave the rear LEDs lit when the light isn't on screen.
+        rgbLed.off();
+        renderRearStatus();
     }
 
     @Override
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        rgbLed.stop();
         super.onDestroy();
+    }
+
+    // Rear RGB LEDs
+
+    private void setupRear() {
+        rgbLed = new RgbLed(this, this);
+        rearEnabled = prefs.getRearLed();
+
+        final var accent = ColorStateList.valueOf(Accents.current(this));
+        binding.rearSwitch.setThumbTintList(new ColorStateList(
+                new int[][] {{android.R.attr.state_checked}, {}},
+                new int[] {Accents.current(this), Color.rgb(0xC8, 0xC8, 0xD2)}));
+        binding.rearSwitch.setTrackTintList(new ColorStateList(
+                new int[][] {{android.R.attr.state_checked}, {}},
+                new int[] {Accents.withAlpha(Accents.current(this), 0.5f),
+                        getColor(R.color.outline)}));
+        binding.rearSwitch.setOnCheckedChangeListener((v, checked) -> {
+            if (!updatingSwitch) {
+                onRearToggled(checked);
+            }
+        });
+        binding.rearRow.setOnClickListener(v -> binding.rearSwitch.toggle());
+
+        binding.ledBrightness.setProgressTintList(accent);
+        binding.ledBrightness.setThumbTintList(accent);
+        binding.ledBrightness.setProgressBackgroundTintList(
+                ColorStateList.valueOf(getColor(R.color.outline)));
+        binding.ledBrightness.setMinHeight(dp(6));
+        binding.ledBrightness.setMaxHeight(dp(6));
+        binding.ledBrightness.setProgress(prefs.getRearLedBrightness());
+        binding.ledBrightness.setOnSeekBarChangeListener(new SimpleSeekListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    onInteraction();
+                    prefs.setRearLedBrightness(progress);
+                    renderLight();
+                }
+            }
+        });
+
+        setRearSwitch(rearEnabled);
+        rgbLed.start();
+        renderRearStatus();
+    }
+
+    private void setRearSwitch(boolean checked) {
+        updatingSwitch = true;
+        binding.rearSwitch.setChecked(checked);
+        updatingSwitch = false;
+        final int visibility = checked ? View.VISIBLE : View.GONE;
+        binding.ledBrightnessLabel.setVisibility(visibility);
+        binding.ledBrightness.setVisibility(visibility);
+    }
+
+    private void setRearEnabled(boolean enabled) {
+        rearEnabled = enabled;
+        prefs.setRearLed(enabled);
+        setRearSwitch(enabled);
+        if (enabled) {
+            renderLight();
+        } else {
+            rgbLed.off();
+        }
+        renderRearStatus();
+    }
+
+    private void onRearToggled(boolean checked) {
+        haptic(binding.rearSwitch);
+        onInteraction();
+
+        if (!checked) {
+            setRearEnabled(false);
+            return;
+        }
+
+        switch (rgbLed.getStatus()) {
+            case READY, CONNECTING -> setRearEnabled(true);
+            case NO_PERMISSION -> {
+                if (rgbLed.requestAccess()) {
+                    // Rendering starts once the permission is granted and the service connects.
+                    setRearEnabled(true);
+                } else {
+                    setRearEnabled(false);
+                    showRearSetup();
+                }
+            }
+            case NOT_INSTALLED, NOT_RUNNING -> {
+                setRearEnabled(false);
+                showRearSetup();
+            }
+            case UNSUPPORTED -> {
+                setRearEnabled(false);
+                Toast.makeText(this, R.string.rear_led_status_unsupported,
+                        Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void showRearSetup() {
+        final boolean installed = rgbLed.getStatus() != RgbLed.Status.NOT_INSTALLED;
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(R.string.rear_led_setup_title)
+                .setMessage(R.string.rear_led_setup_message)
+                .setPositiveButton(installed
+                        ? R.string.rear_led_setup_open : R.string.rear_led_setup_get, (d, w) -> {
+                    try {
+                        final Intent intent = installed
+                                ? getPackageManager().getLaunchIntentForPackage(
+                                        RgbLed.SHIZUKU_PACKAGE)
+                                : new Intent(Intent.ACTION_VIEW,
+                                        Uri.parse("https://shizuku.rikka.app/download/"));
+                        if (intent != null) {
+                            startActivity(intent);
+                        }
+                    } catch (RuntimeException e) {
+                        Toast.makeText(this, R.string.rear_led_setup_title,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void renderRearStatus() {
+        final var status = rgbLed.getStatus();
+        final int text = switch (status) {
+            case NOT_INSTALLED -> R.string.rear_led_status_not_installed;
+            case NOT_RUNNING -> R.string.rear_led_status_not_running;
+            case NO_PERMISSION -> R.string.rear_led_status_no_permission;
+            case CONNECTING -> rearEnabled
+                    ? R.string.rear_led_status_connecting : R.string.rear_led_status_off;
+            case READY -> rearEnabled && rgbLed.isOn()
+                    ? R.string.rear_led_status_on
+                    : rearEnabled ? R.string.rear_led_status_ready
+                    : R.string.rear_led_status_off;
+            case UNSUPPORTED -> R.string.rear_led_status_unsupported;
+        };
+        binding.rearStatus.setText(text);
+        binding.rearSwitch.setEnabled(status != RgbLed.Status.UNSUPPORTED);
+    }
+
+    @Override
+    public void onRgbLedStatusChanged(@NonNull RgbLed.Status status) {
+        if (rearEnabled && status == RgbLed.Status.READY) {
+            renderLight();
+        }
+        renderRearStatus();
+    }
+
+    @Override
+    public void onRgbLedAutoOff() {
+        setRearEnabled(false);
+        Toast.makeText(this, R.string.rear_led_auto_off, Toast.LENGTH_LONG).show();
     }
 
     private int dp(float value) {
@@ -278,6 +447,14 @@ public class ScreenLightActivity extends Activity {
             shown = color;
         }
         binding.light.setBackgroundColor(shown);
+
+        if (rgbLed != null && rearEnabled && resumed) {
+            final boolean wasOn = rgbLed.isOn();
+            rgbLed.show(shown, prefs.getRearLedBrightness() / 100f);
+            if (!wasOn) {
+                renderRearStatus();
+            }
+        }
     }
 
     private void setupHue() {

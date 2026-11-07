@@ -149,11 +149,17 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        aidl = true
     }
     dependenciesInfo {
         includeInApk = false
         includeInBundle = false
     }
+}
+
+dependencies {
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 }
 
 androidComponents.onVariants { variant ->

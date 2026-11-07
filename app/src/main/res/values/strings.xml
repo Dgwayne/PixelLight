@@ -59,8 +59,8 @@
     <string name="preset_boost">Max</string>
     <string name="boost_warning">Above 50% is boost mode. It gets hot quickly, so use it in short bursts.</string>
 
-    <string name="screen_light_title">Screen light</string>
-    <string name="screen_light_desc">Turn the display into a soft colored light</string>
+    <string name="screen_light_title">Color light</string>
+    <string name="screen_light_desc">Colored light from the screen and rear RGB LEDs</string>
     <string name="screen_light_hint">Tap anywhere to show or hide controls</string>
     <string name="screen_light_hue">Hue</string>
     <string name="screen_light_brightness">Screen brightness</string>
@@ -70,6 +70,23 @@
     <string name="mode_strobe">Strobe</string>
     <string name="mode_sos">SOS</string>
     <string name="flash_warning">Strobe and SOS flash rapidly and may affect people with photosensitivity.</string>
+
+    <string name="rear_led_title">Rear RGB LEDs</string>
+    <string name="rear_led_brightness">LED brightness</string>
+    <string name="rear_led_status_off">Light the Pixel 11 Pro HiLight ring in this color</string>
+    <string name="rear_led_status_not_installed">Needs Shizuku · tap to set up</string>
+    <string name="rear_led_status_not_running">Shizuku isn\'t running · tap to set up</string>
+    <string name="rear_led_status_no_permission">Tap to allow PixelLight+ in Shizuku</string>
+    <string name="rear_led_status_connecting">Connecting…</string>
+    <string name="rear_led_status_ready">Ready · dims after 10 s, off after 5 min</string>
+    <string name="rear_led_status_on">On · dims after 10 s, off after 5 min</string>
+    <string name="rear_led_status_unsupported">No RGB LEDs found on this phone</string>
+    <string name="rear_led_auto_off">Rear LEDs turned off after 5 minutes to protect them</string>
+    <string name="rear_led_setup_title">Set up rear RGB LEDs</string>
+    <string name="rear_led_setup_message">Google doesn\'t let regular apps control the Pixel 11 Pro\'s RGB light ring. It works through Shizuku, a free app that shares ADB permissions with apps you approve.\n\n1. Install Shizuku.\n2. Open Shizuku and start it with Wireless debugging (follow its guide). You\'ll need to do this again after each reboot.\n3. Come back here, turn on Rear RGB LEDs, and tap Allow.\n\nThe white flashlight itself can\'t change color. The colors come from the small LED ring around it, so expect a colored glow rather than flashlight brightness.</string>
+    <string name="rear_led_setup_get">Get Shizuku</string>
+    <string name="rear_led_setup_open">Open Shizuku</string>
+    <string name="cancel">Cancel</string>
 
     <string name="color_white">Daylight</string>
     <string name="color_warm">Warm white</string>

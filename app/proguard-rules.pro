@@ -16,3 +16,6 @@
 -keepclasseswithmembers,allowoptimization,allowshrinking class com.chiller3.pixellight.** {
     static final java.lang.String TAG;
 }
+
+# Instantiated by Shizuku via reflection in a separate process.
+-keep class com.chiller3.pixellight.RgbLedUserService { <init>(); *; }
