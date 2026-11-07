@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/light"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/white">
+
+    <TextView
+        android:id="@+id/hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="56dp"
+        android:background="@drawable/bg_scrim_pill"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:text="@string/screen_light_hint"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:id="@+id/controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_margin="12dp"
+        android:background="@drawable/bg_scrim_card"
+        android:clickable="true"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/color_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/screen_light_title"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp" />
+
+            <ImageButton
+                android:id="@+id/close"
+                style="@style/PixelLight.IconButton"
+                android:contentDescription="@string/screen_light_close"
+                android:src="@drawable/ic_close" />
+        </LinearLayout>
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/swatches"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            style="@style/PixelLight.Label"
+            android:layout_marginTop="16dp"
+            android:text="@string/screen_light_hue" />
+
+        <SeekBar
+            android:id="@+id/hue"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginTop="6dp"
+            android:max="360" />
+
+        <TextView
+            style="@style/PixelLight.Label"
+            android:layout_marginTop="12dp"
+            android:text="@string/screen_light_brightness" />
+
+        <SeekBar
+            android:id="@+id/screen_brightness"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginTop="6dp"
+            android:max="100"
+            android:min="5" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/mode_steady"
+                style="@style/PixelLight.Chip"
+                android:text="@string/mode_steady" />
+
+            <TextView
+                android:id="@+id/mode_rainbow"
+                style="@style/PixelLight.Chip"
+                android:layout_marginStart="8dp"
+                android:text="@string/mode_rainbow" />
+
+            <TextView
+                android:id="@+id/mode_strobe"
+                style="@style/PixelLight.Chip"
+                android:layout_marginStart="8dp"
+                android:text="@string/mode_strobe" />
+
+            <TextView
+                android:id="@+id/mode_sos"
+                style="@style/PixelLight.Chip"
+                android:layout_marginStart="8dp"
+                android:text="@string/mode_sos" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/flash_warning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/flash_warning"
+            android:textColor="@color/warning"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

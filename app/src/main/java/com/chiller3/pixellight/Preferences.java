@@ -15,6 +15,11 @@ public class Preferences {
     private static final String PREF_KEEP_SERVICE_ALIVE = "keep_service_alive";
     private static final String PREF_THERMAL_PROTECTION = "thermal_protection";
     private static final String PREF_BOOST_TIMEOUT = "boost_timeout";
+    private static final String PREF_ACCENT = "accent";
+    private static final String PREF_SCREEN_COLOR = "screen_color";
+    private static final String PREF_SCREEN_MODE = "screen_mode";
+    private static final String PREF_HAPTICS = "haptics";
+    private static final String PREF_VOLUME_KEYS = "volume_keys";
 
     private final SharedPreferences prefs;
 
@@ -24,7 +29,11 @@ public class Preferences {
     }
 
     public int getBrightness(int defaultValue) {
-        return prefs.getInt(PREF_BRIGHTNESS, defaultValue);
+        try {
+            return prefs.getInt(PREF_BRIGHTNESS, defaultValue);
+        } catch (ClassCastException e) {
+            return defaultValue;
+        }
     }
 
     public void setBrightness(int value) {
@@ -53,5 +62,45 @@ public class Preferences {
 
     public void setBoostTimeout(boolean enabled) {
         prefs.edit().putBoolean(PREF_BOOST_TIMEOUT, enabled).apply();
+    }
+
+    public int getAccent() {
+        return prefs.getInt(PREF_ACCENT, 0);
+    }
+
+    public void setAccent(int index) {
+        prefs.edit().putInt(PREF_ACCENT, index).apply();
+    }
+
+    public int getScreenColor(int defaultColor) {
+        return prefs.getInt(PREF_SCREEN_COLOR, defaultColor);
+    }
+
+    public void setScreenColor(int color) {
+        prefs.edit().putInt(PREF_SCREEN_COLOR, color).apply();
+    }
+
+    public int getScreenMode() {
+        return prefs.getInt(PREF_SCREEN_MODE, 0);
+    }
+
+    public void setScreenMode(int mode) {
+        prefs.edit().putInt(PREF_SCREEN_MODE, mode).apply();
+    }
+
+    public boolean getHaptics() {
+        return prefs.getBoolean(PREF_HAPTICS, true);
+    }
+
+    public void setHaptics(boolean enabled) {
+        prefs.edit().putBoolean(PREF_HAPTICS, enabled).apply();
+    }
+
+    public boolean getVolumeKeys() {
+        return prefs.getBoolean(PREF_VOLUME_KEYS, true);
+    }
+
+    public void setVolumeKeys(boolean enabled) {
+        prefs.edit().putBoolean(PREF_VOLUME_KEYS, enabled).apply();
     }
 }

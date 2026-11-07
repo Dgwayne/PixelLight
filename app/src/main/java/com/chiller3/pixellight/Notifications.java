@@ -83,9 +83,12 @@ public class Notifications {
         builder.setContentIntent(pendingIntent);
         builder.setOngoing(true);
         builder.setOnlyAlertOnce(true);
+        builder.setColor(Accents.current(context));
 
         if (curBrightness > 0) {
-            builder.setContentText(curBrightness + " / " + maxBrightness);
+            builder.setContentText(context.getString(R.string.notification_persistent_level,
+                    Brightness.toPercent(curBrightness, maxBrightness), curBrightness,
+                    maxBrightness));
             builder.setProgress(maxBrightness, curBrightness, false);
         }
 
@@ -120,6 +123,9 @@ public class Notifications {
     public void sendErrorNotification(@NonNull TorchError error) {
         final var builder = new Notification.Builder(context, CHANNEL_ID_ERROR);
         builder.setContentTitle(context.getString(error.toUiString()));
+        builder.setStyle(new Notification.BigTextStyle()
+                .bigText(context.getString(error.toUiString())));
+        builder.setAutoCancel(true);
         builder.setSmallIcon(R.drawable.ic_notifications);
 
         notificationManager.notify(ID_ERROR, builder.build());

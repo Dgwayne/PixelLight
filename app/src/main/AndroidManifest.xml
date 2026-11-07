@@ -31,6 +31,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ScreenLightActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.PixelLight.ScreenLight" />
+
         <!-- This is exported. Do not rename. -->
         <activity
             android:name=".ToggleActivity"

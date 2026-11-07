@@ -22,6 +22,7 @@ public class TorchTileService extends TileService implements ServiceConnection, 
     private static final String TAG = TorchTileService.class.getSimpleName();
 
     private TorchService.TorchBinder torchBinder;
+    private boolean bound = false;
     private int curBrightness = -1;
     private int maxBrightness = -1;
 
@@ -30,8 +31,14 @@ public class TorchTileService extends TileService implements ServiceConnection, 
         super.onStartListening();
         Log.d(TAG, "Tile is listening");
 
-        final var intent = new Intent(this, TorchService.class);
-        bindService(intent, this, Context.BIND_AUTO_CREATE);
+        if (!bound) {
+            final var intent = new Intent(this, TorchService.class);
+            try {
+                bound = bindService(intent, this, Context.BIND_AUTO_CREATE);
+            } catch (RuntimeException e) {
+                Log.e(TAG, "Failed to bind torch service", e);
+            }
+        }
 
         refreshTileState();
     }
@@ -42,7 +49,14 @@ public class TorchTileService extends TileService implements ServiceConnection, 
         Log.d(TAG, "Tile is no longer listening");
 
         onBinderGone();
-        unbindService(this);
+        if (bound) {
+            bound = false;
+            try {
+                unbindService(this);
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Service was not bound", e);
+            }
+        }
     }
 
     @Override
@@ -66,9 +80,25 @@ public class TorchTileService extends TileService implements ServiceConnection, 
         maxBrightness = -1;
     }
 
+    private void launchCollapsed(@NonNull Intent intent) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivityAndCollapse(PendingIntent.getActivity(
+                    this, 0, intent,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to launch activity from tile", e);
+        }
+    }
+
     @Override
     public void onClick() {
         super.onClick();
+
+        if (!Permissions.haveRequired(this)) {
+            launchCollapsed(new Intent(this, MainActivity.class));
+            return;
+        }
 
         // With Android 15, it is no longer possible to start a foreground service that relies on
         // while-in-use permissions, regardless if that's another service or the TileService itself.
@@ -78,7 +108,10 @@ public class TorchTileService extends TileService implements ServiceConnection, 
         final int newBrightness;
 
         if (curBrightness == -1 || torchBinder == null) {
-            Log.w(TAG, "onClick was reachable before camera session was ready");
+            // The service hasn't connected yet. Previously, this silently did nothing. Let the
+            // toggle activity figure out the current state instead.
+            Log.w(TAG, "onClick reached before service was ready; toggling via activity");
+            launchCollapsed(ToggleActivity.createIntent(this, TorchSession.BRIGHTNESS_TOGGLE));
             return;
         } else if (curBrightness == 0) {
             Log.d(TAG, "Toggling torch on");
@@ -88,16 +121,13 @@ public class TorchTileService extends TileService implements ServiceConnection, 
             newBrightness = 0;
         }
 
-        if (torchBinder.isInForeground()) {
+        if (torchBinder.isInForeground() || newBrightness == 0) {
             // With Android 15, we can't start a camera foreground service from a tile service
-            // anymore, but we can connect to a previously started instance just fine.
+            // anymore, but we can connect to a previously started instance just fine. Turning off
+            // never needs the foreground.
             torchBinder.setTorchBrightness(newBrightness);
         } else {
-            final var intent = ToggleActivity.createIntent(this, newBrightness);
-
-            startActivityAndCollapse(PendingIntent.getActivity(
-                    this, 0, intent,
-                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+            launchCollapsed(ToggleActivity.createIntent(this, newBrightness));
         }
 
         // The tile state will be changed when onTorchStateChanged() is called.
@@ -111,7 +141,8 @@ public class TorchTileService extends TileService implements ServiceConnection, 
         }
 
         if (curBrightness < 0) {
-            tile.setState(Tile.STATE_UNAVAILABLE);
+            // Keep the tile clickable: onClick() can handle the not-yet-connected case.
+            tile.setState(Tile.STATE_INACTIVE);
             tile.setSubtitle(null);
         } else if (curBrightness == 0) {
             tile.setState(Tile.STATE_INACTIVE);
@@ -119,8 +150,8 @@ public class TorchTileService extends TileService implements ServiceConnection, 
         } else {
             tile.setState(Tile.STATE_ACTIVE);
             if (maxBrightness > 0) {
-                final int pct = Math.round(100.0f * curBrightness / maxBrightness);
-                tile.setSubtitle(pct + "% (" + curBrightness + "/" + maxBrightness + ")");
+                tile.setSubtitle(getString(R.string.percent_format,
+                        Brightness.toPercent(curBrightness, maxBrightness)));
             } else {
                 tile.setSubtitle(Integer.toString(curBrightness));
             }
@@ -140,11 +171,7 @@ public class TorchTileService extends TileService implements ServiceConnection, 
     @Override
     public void onTorchError(@NonNull TorchError error) {
         if (error == TorchError.NO_PERMISSION) {
-            final var intent = new Intent(this, MainActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-            startActivityAndCollapse(PendingIntent.getActivity(
-                    this, 0, intent, PendingIntent.FLAG_IMMUTABLE));
+            launchCollapsed(new Intent(this, MainActivity.class));
         }
     }
 }

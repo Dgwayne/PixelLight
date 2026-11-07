@@ -5,13 +5,17 @@
 
 package com.chiller3.pixellight;
 
+import android.Manifest;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.os.Binder;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.MainThread;
@@ -28,6 +32,9 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
             TorchService.class.getCanonicalName() + ".persist";
 
     private static final String EXTRA_BRIGHTNESS = "brightness";
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable debouncedNotificationRunnable = this::updateForegroundNotification;
 
     private TorchSession session;
     private Preferences prefs;
@@ -53,6 +60,10 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
         return intent;
     }
 
+    private boolean haveCameraPermission() {
+        return checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+    }
+
     @Override
     @Nullable
     public IBinder onBind(Intent intent) {
@@ -76,8 +87,8 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
         super.onDestroy();
         Log.d(TAG, "Destroying service");
 
-        session.unregisterTorchListener(this);
         mainHandler.removeCallbacks(debouncedNotificationRunnable);
+        session.unregisterTorchListener(this);
         session.close();
     }
 
@@ -87,60 +98,85 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
 
         final var action = intent != null ? intent.getAction() : null;
 
-        if (ACTION_SET_BRIGHTNESS.equals(action)) {
-            // This intent is delivered via startForegroundService(), so startForeground() must be
-            // called even if the request ends up not turning the torch on (eg. turning off, thermal
-            // refusal, or no valid camera). Otherwise Android crashes the app.
-            updateForegroundNotification();
+        // Every intent may have been delivered via startForegroundService(), so startForeground()
+        // must always be called, even when the request ends up not turning the torch on (eg.
+        // turning off, thermal refusal, or no valid camera). Otherwise Android kills the app with
+        // ForegroundServiceDidNotStartInTimeException.
+        if (!updateForegroundNotification()) {
+            Log.w(TAG, "Could not enter foreground; refusing request: " + intent);
+            if (session.isOwnerNeeded()) {
+                session.abort(TorchError.NO_PERMISSION);
+            }
+            stopSelfSafely();
+            return START_NOT_STICKY;
+        }
 
+        if (ACTION_SET_BRIGHTNESS.equals(action)) {
             final var brightness = intent.getIntExtra(EXTRA_BRIGHTNESS, TorchSession.BRIGHTNESS_TOGGLE);
             session.setTorchBrightness(brightness);
-
-            if (!session.isOwnerNeeded()) {
-                tryStopService();
-            }
         } else if (ACTION_PERSIST.equals(action)) {
             Log.d(TAG, "Keeping service alive");
-            updateForegroundNotification();
         } else {
             Log.w(TAG, "Invalid intent: " + intent);
-            tryStopService();
         }
+
+        tryStopService();
 
         return START_NOT_STICKY;
     }
 
-    private final android.os.Handler mainHandler =
-            new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable debouncedNotificationRunnable = this::updateForegroundNotification;
-
-    private void updateForegroundNotification() {
+    /**
+     * Enter (or refresh) the foreground state.
+     *
+     * @return false if Android refused, eg. because the camera permission was revoked or the app is
+     *         not allowed to start a camera foreground service right now.
+     */
+    @MainThread
+    private boolean updateForegroundNotification() {
         mainHandler.removeCallbacks(debouncedNotificationRunnable);
         Log.d(TAG, "Updating foreground notification");
 
-        final var notification = notifications.createPersistentNotification(
-                curBrightness, maxBrightness);
-        final var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
-        startForeground(Notifications.ID_PERSISTENT, notification, type);
+        if (!haveCameraPermission()) {
+            // startForeground() with the camera type throws SecurityException without CAMERA.
+            Log.w(TAG, "Camera permission not granted");
+            notifications.sendErrorNotification(TorchError.NO_PERMISSION);
+            return false;
+        }
+
+        try {
+            final var notification = notifications.createPersistentNotification(
+                    curBrightness, maxBrightness);
+            startForeground(Notifications.ID_PERSISTENT, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA);
+        } catch (RuntimeException e) {
+            // SecurityException, ForegroundServiceStartNotAllowedException, or
+            // InvalidForegroundServiceTypeException.
+            Log.e(TAG, "Failed to enter foreground", e);
+            return false;
+        }
 
         foreground = true;
+        return true;
+    }
+
+    private void stopSelfSafely() {
+        mainHandler.removeCallbacks(debouncedNotificationRunnable);
+        if (foreground) {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE);
+            foreground = false;
+        }
+        stopSelf();
     }
 
     public void tryStopService() {
         final var ownerNeeded = session.isOwnerNeeded();
         Log.d(TAG, "Attempting to stop service: ownerNeeded=" + ownerNeeded);
 
-        if (prefs.getKeepServiceAlive()) {
+        if (prefs.getKeepServiceAlive() && foreground) {
             Log.d(TAG, "Keeping service alive indefinitely");
         } else if (!ownerNeeded) {
-            mainHandler.removeCallbacks(debouncedNotificationRunnable);
-            Log.d(TAG, "Stopping foreground service");
-            stopForeground(Service.STOP_FOREGROUND_REMOVE);
-
-            foreground = false;
-
             Log.d(TAG, "Stopping service");
-            stopSelf();
+            stopSelfSafely();
         } else {
             Log.d(TAG, "Cannot stop service yet");
         }
@@ -149,8 +185,23 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
     @Override
     public void onTorchOwnerNeeded(boolean needed) {
         if (needed) {
-            Log.d(TAG, "Starting service to keep it alive");
-            startForegroundService(createPersistIntent(this));
+            Log.d(TAG, "Entering foreground to keep the torch alive");
+
+            // Mark the service as started so it survives unbinding. A plain startService() is
+            // used instead of startForegroundService() so that Android does not demand a
+            // startForeground() call later. Previously, if the torch failed quickly (eg. camera in
+            // use or thermal refusal), the service stopped itself before that happened and Android
+            // crashed the app.
+            try {
+                startService(createPersistIntent(this));
+            } catch (RuntimeException e) {
+                Log.w(TAG, "Failed to mark service as started", e);
+            }
+
+            if (!updateForegroundNotification()) {
+                session.abort(haveCameraPermission()
+                        ? TorchError.BACKGROUND_START : TorchError.NO_PERMISSION);
+            }
         } else {
             tryStopService();
         }
@@ -204,6 +255,11 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
         }
 
         @MainThread
+        public boolean isUsingPrivateApi() {
+            return session.isUsingPrivateApi();
+        }
+
+        @MainThread
         public boolean isInForeground() {
             return foreground;
         }
@@ -211,7 +267,11 @@ public class TorchService extends Service implements TorchSession.ServiceOwner, 
         @MainThread
         public void ensureAliveIfConfigured() {
             if (prefs.getKeepServiceAlive() && !foreground && Permissions.haveRequired(TorchService.this)) {
-                startForegroundService(createPersistIntent(TorchService.this));
+                try {
+                    startForegroundService(createPersistIntent(TorchService.this));
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "Failed to start persistent service", e);
+                }
             }
         }
 

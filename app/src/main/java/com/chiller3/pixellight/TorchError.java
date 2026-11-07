@@ -21,6 +21,7 @@ public enum TorchError {
     MAXIMUM_IN_USE,
     NO_VALID_CAMERA,
     THERMAL_SHUTDOWN,
+    BACKGROUND_START,
     UNKNOWN;
 
     public @StringRes int toUiString() {
@@ -35,6 +36,7 @@ public enum TorchError {
             case MAXIMUM_IN_USE -> R.string.notification_error_maximum_in_use;
             case NO_VALID_CAMERA -> R.string.notification_error_no_valid_camera;
             case THERMAL_SHUTDOWN -> R.string.notification_error_thermal_shutdown;
+            case BACKGROUND_START -> R.string.notification_error_background_start;
             case UNKNOWN -> R.string.notification_error_unknown;
         };
     }

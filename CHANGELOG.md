@@ -7,6 +7,30 @@
     to update the actual links at the bottom of the file.
 -->
 
+### Version 2.9-plus
+
+Crash fixes:
+
+* Fix crash at launch on devices where the Pixel private flashlight key is missing or renamed: querying it threw `IllegalArgumentException`, which was not caught
+* Fall back to the standard Android torch strength API when the Pixel private API is unavailable, so the flashlight always works
+* Fix `ForegroundServiceDidNotStartInTimeException` crash when the torch failed quickly (camera in use, thermal refusal): the service no longer calls `startForegroundService()` on itself
+* Fix crash when the tile, lock screen shortcut or another app toggles the torch before the camera permission is granted
+* Fix crash when the camera is taken by another app mid-capture (`IllegalStateException` on a closed session)
+* Only use `TEMPLATE_MANUAL` when the camera supports manual sensor control
+* Ignore late callbacks from a previously opened camera when toggling quickly, which could leave the camera open or turn the torch off unexpectedly
+* Quick settings tile no longer silently ignores taps before the service connects
+
+UI and features:
+
+* Redesigned dark UI with a large glowing power button whose halo scales with brightness, a level ring, big percentage readout, and brightness presets
+* Glow color picker with 8 accents, including "Match wallpaper" (Material You)
+* New Screen light: full-screen color light with 10 presets (including night-vision red), a hue slider, screen brightness control, and Steady / Rainbow / Strobe / SOS modes
+* Volume keys adjust brightness while the torch is on (toggle in settings)
+* Haptic feedback (toggle in settings)
+* Launcher shortcuts: long-press the app icon for Flashlight and Screen light
+* Errors are now shown on the main screen instead of failing silently
+* Notification shows the brightness as a percentage, with clearer action labels
+
 ### Version 2.8
 
 * Resend persistent notification if it is inadvertently dismissed ([Issue #27], [PR #28])

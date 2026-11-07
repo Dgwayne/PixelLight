@@ -1,108 +1,287 @@
+<?xml version="1.0" encoding="utf-8"?>
 <!--
     SPDX-FileCopyrightText: 2024 Andrew Gunnerson
     SPDX-License-Identifier: GPL-3.0-only
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:paddingStart="36dp"
-    android:paddingEnd="36dp">
+    android:background="@color/bg"
+    android:fillViewport="true"
+    android:overScrollMode="never">
 
     <LinearLayout
-        android:id="@+id/torch_group"
+        android:id="@+id/content"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:gravity="center">
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="24dp">
 
-        <TextView
-            android:id="@+id/label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="18sp" />
-
-        <SeekBar
-            android:id="@+id/brightness"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp" />
-
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/preset_low"
-                style="?android:attr/buttonBarButtonStyle"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/preset_low" />
+                android:orientation="vertical">
 
-            <Button
-                android:id="@+id/preset_medium"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/preset_medium" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="24sp" />
 
-            <Button
-                android:id="@+id/preset_high"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/preset_high" />
+                <TextView
+                    android:id="@+id/status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/status_loading"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+            </LinearLayout>
 
-            <Button
-                android:id="@+id/preset_boost"
-                style="?android:attr/buttonBarButtonStyle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/preset_boost" />
+            <ImageButton
+                android:id="@+id/settings"
+                style="@style/PixelLight.IconButton"
+                android:contentDescription="@string/settings"
+                android:src="@drawable/ic_more" />
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/boost_warning"
-            android:layout_width="wrap_content"
+        <!-- Torch controls -->
+        <LinearLayout
+            android:id="@+id/torch_group"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:text="@string/boost_warning"
-            android:textSize="14sp"
-            android:visibility="invisible" />
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
 
-        <Switch
-            android:id="@+id/toggle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp" />
+            <com.chiller3.pixellight.GlowView
+                android:id="@+id/glow"
+                android:layout_width="300dp"
+                android:layout_height="300dp"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:id="@+id/percent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-light"
+                android:includeFontPadding="false"
+                android:textColor="@color/text_primary"
+                android:textSize="64sp" />
+
+            <TextView
+                android:id="@+id/level"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/boost_warning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_warning"
+                android:gravity="center"
+                android:paddingStart="16dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="10dp"
+                android:text="@string/boost_warning"
+                android:textColor="@color/warning"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <!-- Brightness card -->
+            <LinearLayout
+                style="@style/PixelLight.Card"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/PixelLight.Label"
+                    android:text="@string/section_brightness" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageButton
+                        android:id="@+id/dimmer"
+                        style="@style/PixelLight.IconButton"
+                        android:contentDescription="@string/action_dimmer"
+                        android:src="@drawable/ic_remove" />
+
+                    <SeekBar
+                        android:id="@+id/brightness"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp" />
+
+                    <ImageButton
+                        android:id="@+id/brighter"
+                        style="@style/PixelLight.IconButton"
+                        android:contentDescription="@string/action_brighter"
+                        android:src="@drawable/ic_add" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/preset_low"
+                        style="@style/PixelLight.Chip"
+                        android:text="@string/preset_low" />
+
+                    <TextView
+                        android:id="@+id/preset_medium"
+                        style="@style/PixelLight.Chip"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/preset_medium" />
+
+                    <TextView
+                        android:id="@+id/preset_high"
+                        style="@style/PixelLight.Chip"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/preset_high" />
+
+                    <TextView
+                        android:id="@+id/preset_boost"
+                        style="@style/PixelLight.Chip"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/preset_boost" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Accent card -->
+            <LinearLayout
+                style="@style/PixelLight.Card"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/PixelLight.Label"
+                    android:text="@string/section_glow" />
+
+                <LinearLayout
+                    android:id="@+id/accent_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal" />
+            </LinearLayout>
+
+            <!-- Screen light entry -->
+            <LinearLayout
+                android:id="@+id/screen_light"
+                style="@style/PixelLight.Card"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/screen_light_icon"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/bg_icon_button"
+                    android:importantForAccessibility="no"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_screen_light" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:text="@string/screen_light_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/screen_light_desc"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_chevron"
+                    android:tint="@color/text_secondary" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Permissions -->
+        <LinearLayout
+            android:id="@+id/permission_group"
+            style="@style/PixelLight.Card"
+            android:layout_marginTop="48dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:padding="28dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/permissions_title"
+                android:textColor="@color/text_primary"
+                android:textSize="22sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.15"
+                android:text="@string/permissions_desc"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/request_permissions"
+                android:layout_width="wrap_content"
+                android:layout_height="52dp"
+                android:layout_marginTop="24dp"
+                android:fontFamily="sans-serif-medium"
+                android:paddingStart="28dp"
+                android:paddingEnd="28dp"
+                android:stateListAnimator="@null"
+                android:text="@string/permissions_name"
+                android:textAllCaps="false"
+                android:textSize="16sp" />
+        </LinearLayout>
     </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/permission_group"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/permissions_desc"
-            android:textSize="18sp" />
-
-        <Button
-            android:id="@+id/request_permissions"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/permissions_name" />
-    </LinearLayout>
-</LinearLayout>
+</ScrollView>

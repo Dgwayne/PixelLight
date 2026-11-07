@@ -9,6 +9,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -19,6 +20,8 @@ import androidx.annotation.Nullable;
  * possible from the tile's context in Android 15.
  */
 public class ToggleActivity extends Activity {
+    private static final String TAG = ToggleActivity.class.getSimpleName();
+
     /** This is exported. Do not rename. */
     private static final String EXTRA_BRIGHTNESS = "brightness";
 
@@ -32,9 +35,26 @@ public class ToggleActivity extends Activity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        if (!Permissions.haveCamera(this)) {
+            // Starting a camera foreground service without the camera permission throws a
+            // SecurityException inside the service and crashes the app. Send the user to the main
+            // screen to grant it instead.
+            Log.w(TAG, "Camera permission missing; opening main activity");
+            final var main = new Intent(this, MainActivity.class);
+            main.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(main);
+            finish();
+            return;
+        }
+
         final var brightness = getIntent().getIntExtra(EXTRA_BRIGHTNESS, TorchSession.BRIGHTNESS_TOGGLE);
         final var serviceIntent = TorchService.createSetBrightnessIntent(this, brightness);
-        startForegroundService(serviceIntent);
+        try {
+            startForegroundService(serviceIntent);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to start torch service", e);
+            new Notifications(this).sendErrorNotification(TorchError.BACKGROUND_START);
+        }
 
         finish();
     }

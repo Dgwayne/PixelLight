@@ -25,6 +25,11 @@ public class Permissions {
 
     private Permissions() {}
 
+    public static boolean haveCamera(@NonNull Context context) {
+        return context.checkSelfPermission(Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     public static boolean haveRequired(@NonNull Context context) {
         return Arrays.stream(REQUIRED).allMatch(p ->
                 context.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED);

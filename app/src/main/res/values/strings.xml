@@ -3,10 +3,16 @@
     SPDX-License-Identifier: GPL-3.0-only
 -->
 <resources>
-    <string name="permissions_name">Request permissions</string>
+    <string name="permissions_title">Almost ready</string>
+    <string name="permissions_name">Grant permissions</string>
     <string name="permissions_desc">The camera permission is required to access the private Google Pixel API for using the full brightness range. The notification permission is required to keep the flashlight on in the background.</string>
 
     <string name="menu_keep_service_alive">Keep service alive</string>
+    <string name="menu_thermal_protection">Thermal protection</string>
+    <string name="menu_boost_timeout">Step down boost after 2 min</string>
+    <string name="menu_haptics">Haptic feedback</string>
+    <string name="menu_volume_keys">Volume keys adjust brightness</string>
+    <string name="settings">Settings</string>
 
     <string name="notification_channel_persistent_name">Background services</string>
     <string name="notification_channel_persistent_desc">Persistent notification required for running in the background</string>
@@ -14,13 +20,14 @@
     <string name="notification_channel_error_desc">Alerts shown when errors occur</string>
     <string name="notification_persistent_torch_on">Flashlight is on</string>
     <string name="notification_persistent_torch_off">Flashlight is off</string>
+    <string name="notification_persistent_level">%1$d%% · level %2$d of %3$d</string>
     <string name="notification_action_turn_on">Turn on</string>
     <string name="notification_action_turn_off">Turn off</string>
-    <string name="notification_action_increase">↑↑↑</string>
-    <string name="notification_action_decrease">↓↓↓</string>
+    <string name="notification_action_increase">Brighter</string>
+    <string name="notification_action_decrease">Dimmer</string>
     <string name="notification_error_no_permission">Camera permission is required</string>
     <string name="notification_error_blocked_by_policy">Camera access is blocked by device policy</string>
-    <string name="notification_error_disconnected">Camera disconnected</string>
+    <string name="notification_error_disconnected">Flashlight turned off because another app took the camera</string>
     <string name="notification_error_device_error">Camera device failed with fatal error</string>
     <string name="notification_error_service_error">Android camera service failed with fatal error</string>
     <string name="notification_error_session_error">Android camera session failed with fatal error</string>
@@ -29,15 +36,65 @@
     <string name="notification_error_no_valid_camera">No camera device with suitable flash found</string>
     <string name="notification_error_unknown">Camera failed with unknown error</string>
     <string name="notification_error_thermal_shutdown">Flashlight turned off because the phone is too hot</string>
+    <string name="notification_error_background_start">Android blocked the flashlight from starting in the background. Open PixelLight+ and try again.</string>
 
-    <string name="menu_thermal_protection">Thermal protection</string>
-    <string name="menu_boost_timeout">Step down boost after 2 min</string>
+    <string name="status_off">Off</string>
+    <string name="status_on">On</string>
+    <string name="status_boost">Boost</string>
+    <string name="status_loading">Looking for the flash…</string>
+    <string name="percent_format">%1$d%%</string>
+    <string name="level_format">Level %1$d of %2$d</string>
+    <string name="level_off_format">Tap to turn on · last used %1$d%%</string>
+    <string name="action_turn_on">Turn flashlight on</string>
+    <string name="action_turn_off">Turn flashlight off</string>
+    <string name="action_dimmer">Dimmer</string>
+    <string name="action_brighter">Brighter</string>
 
-    <string name="preset_low">Low</string>
-    <string name="preset_medium">Medium</string>
-    <string name="preset_high">High</string>
-    <string name="preset_boost">Boost</string>
+    <string name="section_brightness">Brightness</string>
+    <string name="section_glow">Glow color</string>
+
+    <string name="preset_low">10%</string>
+    <string name="preset_medium">25%</string>
+    <string name="preset_high">50%</string>
+    <string name="preset_boost">Max</string>
     <string name="boost_warning">Above 50% is boost mode. It gets hot quickly, so use it in short bursts.</string>
+
+    <string name="screen_light_title">Screen light</string>
+    <string name="screen_light_desc">Turn the display into a soft colored light</string>
+    <string name="screen_light_hint">Tap anywhere to show or hide controls</string>
+    <string name="screen_light_hue">Hue</string>
+    <string name="screen_light_brightness">Screen brightness</string>
+    <string name="screen_light_close">Close screen light</string>
+    <string name="mode_steady">Steady</string>
+    <string name="mode_rainbow">Rainbow</string>
+    <string name="mode_strobe">Strobe</string>
+    <string name="mode_sos">SOS</string>
+    <string name="flash_warning">Strobe and SOS flash rapidly and may affect people with photosensitivity.</string>
+
+    <string name="color_white">Daylight</string>
+    <string name="color_warm">Warm white</string>
+    <string name="color_candle">Candle</string>
+    <string name="color_amber">Amber</string>
+    <string name="color_red">Night vision red</string>
+    <string name="color_green">Green</string>
+    <string name="color_cyan">Cyan</string>
+    <string name="color_blue">Blue</string>
+    <string name="color_purple">Purple</string>
+    <string name="color_pink">Pink</string>
+
+    <string name="accent_dynamic">Match wallpaper</string>
+    <string name="accent_amber">Amber</string>
+    <string name="accent_ice">Ice</string>
+    <string name="accent_lime">Lime</string>
+    <string name="accent_rose">Rose</string>
+    <string name="accent_violet">Violet</string>
+    <string name="accent_ember">Ember</string>
+    <string name="accent_mint">Mint</string>
+
+    <string name="shortcut_toggle_short">Flashlight</string>
+    <string name="shortcut_toggle_long">Toggle flashlight</string>
+    <string name="shortcut_screen_short">Screen light</string>
+    <string name="shortcut_screen_long">Open screen light</string>
 
     <string name="tile_subtitle_off">Off</string>
 </resources>

@@ -13,6 +13,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
@@ -73,6 +74,7 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     private final Surface surface;
     private final Preferences prefs;
     private final Runnable boostTimeoutRunnable = this::onBoostTimeout;
+    private boolean closed = false;
 
     // Things following the torch lifecycle.
     private State state = State.OFF;
@@ -86,36 +88,32 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     private int desiredBrightness = 0;
     private CameraDevice camera;
     private CameraCaptureSession session;
+    // Incremented every time a camera is opened or closed so that late callbacks from a previous
+    // open (eg. the user toggled quickly) are detected and ignored instead of corrupting the state
+    // or tearing down the new session.
+    private int openGeneration = 0;
+    // True when the Pixel private API is unavailable and the standard Android 13+ torch strength
+    // API is used instead. This has a lower maximum but works on any device with a flash.
+    private boolean standardTorch = false;
 
-    // Callbacks.
-    private final CameraDevice.StateCallback cameraCallback = new CameraDevice.StateCallback() {
+    private final CameraManager.TorchCallback torchCallback = new CameraManager.TorchCallback() {
         @Override
-        public void onOpened(@NonNull CameraDevice camera) {
-            mainHandler.post(() -> onCameraOpened(camera));
+        public void onTorchModeChanged(@NonNull String id, boolean enabled) {
+            // Something else (eg. the system flashlight tile) turned the torch off.
+            if (standardTorch && !enabled && id.equals(cameraId) && state == State.ON) {
+                Log.i(TAG, "Torch turned off externally");
+                closeCamera();
+            }
         }
 
         @Override
-        public void onDisconnected(@NonNull CameraDevice camera) {
-            mainHandler.post(() -> onCameraClosed(camera));
-        }
-
-        @Override
-        public void onError(@NonNull CameraDevice camera, int error) {
-            mainHandler.post(() -> onCameraError(camera, error));
+        public void onTorchModeUnavailable(@NonNull String id) {
+            if (standardTorch && id.equals(cameraId) && state != State.OFF) {
+                Log.w(TAG, "Torch became unavailable");
+                onError(TorchError.IN_USE);
+            }
         }
     };
-    private final CameraCaptureSession.StateCallback sessionCallback =
-            new CameraCaptureSession.StateCallback() {
-                @Override
-                public void onConfigured(@NonNull CameraCaptureSession session) {
-                    mainHandler.post(() -> onSessionConfigured(session));
-                }
-
-                @Override
-                public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    mainHandler.post(() -> onSessionConfigureFailed(session));
-                }
-            };
 
     public TorchSession(@NonNull Context context, @NonNull ServiceOwner owner) {
         serviceOwner = owner;
@@ -134,10 +132,19 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
         if (powerManager != null) {
             powerManager.addThermalStatusListener(context.getMainExecutor(), this);
         }
+        if (cameraManager != null) {
+            cameraManager.registerTorchCallback(torchCallback, mainHandler);
+        }
+    }
+
+    /** Whether the Pixel private high-brightness API is in use (enables boost levels). */
+    public boolean isUsingPrivateApi() {
+        return cameraId != null && !standardTorch;
     }
 
     @MainThread
     public void close() {
+        closed = true;
         mainHandler.removeCallbacks(boostTimeoutRunnable);
 
         if (powerManager != null) {
@@ -152,6 +159,11 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
             closeCamera();
         }
 
+        if (cameraManager != null) {
+            cameraManager.unregisterTorchCallback(torchCallback);
+        }
+
+        listeners.clear();
         cameraThread.quitSafely();
 
         surface.release();
@@ -184,6 +196,10 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
         return state != State.OFF;
     }
 
+    public int getMaxBrightness() {
+        return maxBrightness;
+    }
+
     private void notifyOwnerNeeded() {
         Log.d(TAG, "Notifying owner that foreground mode is needed");
         serviceOwner.onTorchOwnerNeeded(true);
@@ -202,14 +218,31 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     private boolean updateCameraDetails() {
         if (cameraId != null) {
             return true;
+        } else if (cameraManager == null || closed) {
+            return false;
         }
 
         try {
             for (final var cameraId : cameraManager.getCameraIdList()) {
-                final var characteristics = cameraManager.getCameraCharacteristics(cameraId);
-                final var maxBrightness = characteristics.get(
-                        ExperimentalKeys.CHARACTERISTICS_FLASHLIGHT_BRIGHTNESS_LEVEL_MAX);
-                if (maxBrightness == null) {
+                final CameraCharacteristics characteristics;
+                final Integer maxBrightness;
+                try {
+                    characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                    maxBrightness = characteristics.get(
+                            ExperimentalKeys.CHARACTERISTICS_FLASHLIGHT_BRIGHTNESS_LEVEL_MAX);
+                } catch (IllegalArgumentException e) {
+                    // Some cameras (eg. logical multi-cameras or ones not yet ready after boot)
+                    // can throw here. Skip them instead of crashing.
+                    Log.w(TAG, "Failed to query camera " + cameraId, e);
+                    continue;
+                }
+                if (maxBrightness == null || maxBrightness <= 0) {
+                    continue;
+                }
+
+                final Boolean hasFlash = characteristics.get(
+                        CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (hasFlash != null && !hasFlash) {
                     continue;
                 }
 
@@ -250,20 +283,88 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
                 return true;
             }
 
+            if (findStandardTorch()) {
+                return true;
+            }
+
             Log.e(TAG, "Failed to find suitable camera");
             onError(TorchError.NO_VALID_CAMERA);
         } catch (CameraAccessException e) {
             Log.e(TAG, "Failed to query for suitable cameras", e);
             onError(TorchError.fromException(e));
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Unexpected failure querying cameras", e);
+            onError(TorchError.UNKNOWN);
         }
 
         return false;
     }
 
+    /** Fallback for devices where the Pixel private brightness key doesn't exist. */
+    @MainThread
+    private boolean findStandardTorch() throws CameraAccessException {
+        String fallbackId = null;
+        int fallbackMax = 0;
+
+        for (final var id : cameraManager.getCameraIdList()) {
+            try {
+                final var c = cameraManager.getCameraCharacteristics(id);
+                final Boolean hasFlash = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (hasFlash == null || !hasFlash) {
+                    continue;
+                }
+                final Integer max = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
+                final int level = max != null && max > 0 ? max : 1;
+                final Integer facing = c.get(CameraCharacteristics.LENS_FACING);
+                final boolean back = facing != null
+                        && facing == CameraCharacteristics.LENS_FACING_BACK;
+                // Prefer the rear flash, then the one with the most levels.
+                if (fallbackId == null || (back && level >= fallbackMax)) {
+                    fallbackId = id;
+                    fallbackMax = level;
+                }
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Failed to query camera " + id, e);
+            }
+        }
+
+        if (fallbackId == null) {
+            return false;
+        }
+
+        cameraId = fallbackId;
+        maxBrightness = fallbackMax;
+        curBrightness = 0;
+        standardTorch = true;
+        Log.i(TAG, "Pixel private API unavailable; using standard torch on camera "
+                + fallbackId + " with max level " + fallbackMax);
+        return true;
+    }
+
+    @MainThread
+    private void applyStandardTorch() {
+        try {
+            if (maxBrightness > 1) {
+                cameraManager.turnOnTorchWithStrengthLevel(cameraId, desiredBrightness);
+            } else {
+                cameraManager.setTorchMode(cameraId, true);
+            }
+            state = State.ON;
+            curBrightness = desiredBrightness;
+            notifyTorchState();
+        } catch (CameraAccessException e) {
+            Log.e(TAG, "Failed to turn on standard torch", e);
+            onError(TorchError.fromException(e));
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to turn on standard torch", e);
+            onError(TorchError.UNKNOWN);
+        }
+    }
+
     @MainThread
     public void refreshCameras() {
         if (updateCameraDetails()) {
-            for (final var listener : listeners) {
+            for (final var listener : listeners.toArray(new Listener[0])) {
                 listener.onTorchStateChanged(curBrightness, maxBrightness);
             }
         }
@@ -278,7 +379,10 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     public void setTorchBrightness(int brightness, boolean persist) {
         Log.d(TAG, "User requesting brightness of " + brightness + " (persist=" + persist + ")");
 
-        if (maxBrightness <= 0 && !updateCameraDetails()) {
+        if (closed) {
+            Log.w(TAG, "Ignoring request on closed session");
+            return;
+        } else if (maxBrightness <= 0 && !updateCameraDetails()) {
             return;
         }
 
@@ -314,16 +418,18 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
             return;
         }
 
-        desiredBrightness = Math.min(desiredBrightness, maxBrightness);
+        // A persisted value from an older install could be out of range.
+        desiredBrightness = Math.max(0, Math.min(desiredBrightness, maxBrightness));
 
         if (desiredBrightness > 0 && powerManager != null && prefs.getThermalProtection()) {
             final int thermal = powerManager.getCurrentThermalStatus();
             if (thermal >= PowerManager.THERMAL_STATUS_SEVERE) {
                 Log.w(TAG, "Refusing to turn on torch: thermal status " + thermal);
+                desiredBrightness = 0;
                 onError(TorchError.THERMAL_SHUTDOWN);
                 return;
             } else if (thermal == PowerManager.THERMAL_STATUS_MODERATE) {
-                final int safeStockMax = Math.max(1, maxBrightness / 2);
+                final int safeStockMax = getSafeMax();
                 if (desiredBrightness > safeStockMax) {
                     Log.w(TAG, "Clamping torch to " + safeStockMax + " due to thermal status");
                     desiredBrightness = safeStockMax;
@@ -333,7 +439,11 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
         }
 
         if (desiredBrightness == 0) {
-            closeCamera();
+            if (state != State.OFF) {
+                closeCamera();
+            } else {
+                notifyTorchState();
+            }
             return;
         } else if (persist) {
             prefs.setBrightness(desiredBrightness);
@@ -346,26 +456,37 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
             // Session is not ready yet. It'll pick up the new value when it is ready.
             case ACTIVATING -> {}
             // Session is already active. Change the brightness with a new capture request.
-            case ON -> performCapture();
+            case ON -> {
+                if (standardTorch) {
+                    applyStandardTorch();
+                } else {
+                    performCapture();
+                }
+            }
         }
+    }
+
+    private int getSafeMax() {
+        // The standard API's maximum is already the stock-safe level; there is no boost range.
+        if (standardTorch) {
+            return Math.max(1, maxBrightness);
+        }
+        return Math.max(1, maxBrightness / 2);
     }
 
     @MainThread
     private void scheduleBoostTimeoutIfNeeded() {
         mainHandler.removeCallbacks(boostTimeoutRunnable);
 
-        if (prefs.getBoostTimeout() && maxBrightness > 0) {
-            final int safeStockMax = Math.max(1, maxBrightness / 2);
-            if (desiredBrightness > safeStockMax) {
-                mainHandler.postDelayed(boostTimeoutRunnable, BOOST_TIMEOUT_MS);
-            }
+        if (prefs.getBoostTimeout() && maxBrightness > 0 && desiredBrightness > getSafeMax()) {
+            mainHandler.postDelayed(boostTimeoutRunnable, BOOST_TIMEOUT_MS);
         }
     }
 
     @MainThread
     private void onBoostTimeout() {
         if (state == State.ON && maxBrightness > 0) {
-            final int safeStockMax = Math.max(1, maxBrightness / 2);
+            final int safeStockMax = getSafeMax();
             if (curBrightness > safeStockMax) {
                 Log.i(TAG, "Boost timeout reached; stepping down to safe max: " + safeStockMax);
                 setTorchBrightness(safeStockMax, false);
@@ -376,7 +497,7 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     @Override
     @MainThread
     public void onThermalStatusChanged(int status) {
-        if (state == State.OFF || !prefs.getThermalProtection() || maxBrightness <= 0) {
+        if (closed || state == State.OFF || !prefs.getThermalProtection() || maxBrightness <= 0) {
             return;
         }
 
@@ -384,7 +505,7 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
             Log.w(TAG, "Severe thermal status (" + status + "); shutting down torch");
             onError(TorchError.THERMAL_SHUTDOWN);
         } else if (status == PowerManager.THERMAL_STATUS_MODERATE) {
-            final int safeStockMax = Math.max(1, maxBrightness / 2);
+            final int safeStockMax = getSafeMax();
             if (curBrightness > safeStockMax) {
                 Log.w(TAG, "Moderate thermal status; stepping down torch to " + safeStockMax);
                 setTorchBrightness(safeStockMax, false);
@@ -403,21 +524,44 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
         }
     }
 
+    /** Called by the owner if it could not enter the foreground. The torch must not stay on. */
+    @MainThread
+    public void abort(@NonNull TorchError error) {
+        onError(error);
+    }
+
     @MainThread
     private void openCamera() {
-        assert state == State.OFF;
+        if (state != State.OFF) {
+            Log.w(TAG, "openCamera() called in state " + state);
+            return;
+        }
         state = State.ACTIVATING;
+        final int generation = ++openGeneration;
 
         notifyOwnerNeeded();
 
+        // The owner may have failed to enter the foreground and aborted us.
+        if (state != State.ACTIVATING || generation != openGeneration) {
+            return;
+        }
+
+        if (standardTorch) {
+            applyStandardTorch();
+            return;
+        }
+
         try {
-            cameraManager.openCamera(cameraId, cameraCallback, cameraHandler);
+            cameraManager.openCamera(cameraId, new CameraCallback(generation), cameraHandler);
         } catch (CameraAccessException e) {
             Log.e(TAG, "Failed to open camera: " + cameraId, e);
             onError(TorchError.fromException(e));
         } catch (SecurityException e) {
             Log.e(TAG, "Permission denied when opening camera: " + cameraId, e);
             onError(TorchError.NO_PERMISSION);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Unexpected failure when opening camera: " + cameraId, e);
+            onError(TorchError.UNKNOWN);
         }
     }
 
@@ -425,11 +569,28 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     private void closeCamera() {
         mainHandler.removeCallbacks(boostTimeoutRunnable);
 
+        // Invalidate any in-flight callbacks for the camera being closed.
+        ++openGeneration;
+
+        if (standardTorch && state != State.OFF) {
+            // Update state first so our own torch callback doesn't re-enter.
+            state = State.OFF;
+            try {
+                cameraManager.setTorchMode(cameraId, false);
+            } catch (CameraAccessException | RuntimeException e) {
+                Log.w(TAG, "Failed to turn off standard torch", e);
+            }
+            curBrightness = 0;
+            notifyTorchState();
+            tryNotifyOwnerNotNeeded();
+            return;
+        }
+
         // We don't need to close the session. Closing the camera device is sufficient.
         session = null;
 
         if (camera != null) {
-            camera.close();
+            safeClose(camera);
             camera = null;
         }
 
@@ -446,33 +607,69 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
         }
     }
 
+    private static void safeClose(@NonNull CameraDevice camera) {
+        try {
+            camera.close();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Failed to close camera " + camera.getId(), e);
+        }
+    }
+
+    private boolean isStale(int generation) {
+        return closed || generation != openGeneration || state == State.OFF;
+    }
+
     @MainThread
-    private void onCameraOpened(@NonNull CameraDevice camera) {
+    private void onCameraOpened(int generation, @NonNull CameraDevice camera) {
+        if (isStale(generation)) {
+            Log.d(TAG, "Closing stale camera " + camera.getId());
+            safeClose(camera);
+            return;
+        }
+
         Log.d(TAG, "Camera " + camera.getId() + " opened");
 
         this.camera = camera;
 
         final var output = Collections.singletonList(new OutputConfiguration(surface));
         final var sessionConfiguration = new SessionConfiguration(
-                SessionConfiguration.SESSION_REGULAR, output, cameraExecutor, sessionCallback);
+                SessionConfiguration.SESSION_REGULAR, output, cameraExecutor,
+                new SessionCallback(generation));
 
         try {
             camera.createCaptureSession(sessionConfiguration);
         } catch (CameraAccessException e) {
             Log.e(TAG, "Failed to create capture session", e);
             onError(TorchError.fromException(e));
+        } catch (RuntimeException e) {
+            // IllegalStateException if the camera was closed underneath us, or
+            // IllegalArgumentException if the HAL rejects the output configuration.
+            Log.e(TAG, "Failed to create capture session", e);
+            onError(TorchError.SESSION_ERROR);
         }
     }
 
     @MainThread
-    private void onCameraClosed(@NonNull CameraDevice camera) {
+    private void onCameraClosed(int generation, @NonNull CameraDevice camera) {
+        if (isStale(generation)) {
+            Log.d(TAG, "Ignoring disconnect of stale camera " + camera.getId());
+            safeClose(camera);
+            return;
+        }
+
         Log.e(TAG, "Camera " + camera.getId() + " disconnected");
 
         onError(TorchError.DISCONNECTED);
     }
 
     @MainThread
-    private void onCameraError(@NonNull CameraDevice camera, int error) {
+    private void onCameraError(int generation, @NonNull CameraDevice camera, int error) {
+        if (isStale(generation)) {
+            Log.d(TAG, "Ignoring error from stale camera " + camera.getId() + ": " + error);
+            safeClose(camera);
+            return;
+        }
+
         Log.e(TAG, "Camera " + camera.getId() + " failed with error: " + error);
 
         final var torchError = switch (error) {
@@ -488,7 +685,12 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     }
 
     @MainThread
-    private void onSessionConfigured(@NonNull CameraCaptureSession session) {
+    private void onSessionConfigured(int generation, @NonNull CameraCaptureSession session) {
+        if (isStale(generation)) {
+            Log.d(TAG, "Ignoring stale session: " + session);
+            return;
+        }
+
         Log.d(TAG, "Camera session configured: " + session);
 
         this.session = session;
@@ -497,7 +699,11 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
     }
 
     @MainThread
-    private void onSessionConfigureFailed(@NonNull CameraCaptureSession session) {
+    private void onSessionConfigureFailed(int generation, @NonNull CameraCaptureSession session) {
+        if (isStale(generation)) {
+            return;
+        }
+
         Log.e(TAG, "Failed to configure session: " + session);
 
         onError(TorchError.SESSION_ERROR);
@@ -505,56 +711,82 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
 
     @MainThread
     private void performCapture() {
+        if (session == null) {
+            Log.w(TAG, "performCapture() called without an active session");
+            return;
+        }
+
+        state = State.ON;
+
+        if (curBrightness == desiredBrightness) {
+            return;
+        }
+
+        Log.d(TAG, "Performing capture because current brightness (" + curBrightness +
+                ") != desired brightness (" + desiredBrightness + ")");
+        curBrightness = desiredBrightness;
+
         try {
-            assert state == State.ACTIVATING || state == State.ON;
-            state = State.ON;
+            // TEMPLATE_MANUAL is only guaranteed to exist when MANUAL_SENSOR is advertised.
+            // Requesting it otherwise throws IllegalArgumentException.
+            final int template = optimizeIsp && supportsManualSensor()
+                    ? CameraDevice.TEMPLATE_MANUAL
+                    : CameraDevice.TEMPLATE_PREVIEW;
 
-            if (curBrightness != desiredBrightness) {
-                Log.d(TAG, "Performing capture because current brightness (" + curBrightness +
-                        ") != desired brightness (" + desiredBrightness + ")");
-                curBrightness = desiredBrightness;
+            final var captureRequest = session.getDevice().createCaptureRequest(template);
+            captureRequest.addTarget(surface);
+            captureRequest.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH);
+            captureRequest.set(ExperimentalKeys.REQUEST_FLASHLIGHT_BRIGHTNESS_ENABLED, true);
+            captureRequest.set(ExperimentalKeys.REQUEST_FLASHLIGHT_BRIGHTNESS, curBrightness);
 
-                final var captureRequest = session.getDevice()
-                        .createCaptureRequest(CameraDevice.TEMPLATE_MANUAL);
-                captureRequest.addTarget(surface);
-                captureRequest.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH);
-                captureRequest.set(ExperimentalKeys.REQUEST_FLASHLIGHT_BRIGHTNESS_ENABLED, true);
-                captureRequest.set(ExperimentalKeys.REQUEST_FLASHLIGHT_BRIGHTNESS, curBrightness);
-
-                if (optimizeIsp) {
-                    applyLowPowerSettings(captureRequest);
-                }
-
-                session.capture(captureRequest.build(), captureCallback, cameraHandler);
-
-                notifyTorchState();
+            if (optimizeIsp) {
+                applyLowPowerSettings(captureRequest);
             }
+
+            session.capture(captureRequest.build(), new CaptureCallback(openGeneration),
+                    cameraHandler);
+
+            notifyTorchState();
         } catch (CameraAccessException e) {
             Log.e(TAG, "Failed to perform capture", e);
             onError(TorchError.fromException(e));
+        } catch (IllegalStateException e) {
+            // The session or device was closed (eg. another app grabbed the camera) before the
+            // disconnect callback reached the main thread. Previously this crashed the app.
+            Log.e(TAG, "Session closed while performing capture", e);
+            onError(TorchError.DISCONNECTED);
+        } catch (IllegalArgumentException e) {
+            if (optimizeIsp) {
+                Log.w(TAG, "HAL rejected low-power request; retrying with stock request", e);
+                retryWithoutOptimizations();
+            } else {
+                Log.e(TAG, "HAL rejected capture request", e);
+                onError(TorchError.SESSION_ERROR);
+            }
         }
     }
 
-    private final CameraCaptureSession.CaptureCallback captureCallback =
-            new CameraCaptureSession.CaptureCallback() {
-                @Override
-                public void onCaptureFailed(@NonNull CameraCaptureSession session,
-                                            @NonNull CaptureRequest request,
-                                            @NonNull android.hardware.camera2.CaptureFailure failure) {
-                    mainHandler.post(() -> onCaptureFailedMain(session));
-                }
-            };
+    @MainThread
+    private void retryWithoutOptimizations() {
+        optimizeIsp = false;
+        // Force performCapture() to issue a new request.
+        final int target = curBrightness;
+        curBrightness = -1;
+        desiredBrightness = target;
+        performCapture();
+    }
 
     @MainThread
-    private void onCaptureFailedMain(@NonNull CameraCaptureSession failedSession) {
-        if (optimizeIsp && failedSession == session && state == State.ON) {
+    private void onCaptureFailedMain(int generation) {
+        if (isStale(generation) || state != State.ON) {
+            return;
+        }
+
+        if (optimizeIsp) {
             Log.w(TAG, "Capture failed with low-power settings; retrying with stock request");
-            optimizeIsp = false;
-            // Force performCapture() to issue a new request.
-            final int target = curBrightness;
-            curBrightness = -1;
-            desiredBrightness = target;
-            performCapture();
+            retryWithoutOptimizations();
+        } else {
+            Log.w(TAG, "Capture failed with stock request");
         }
     }
 
@@ -570,6 +802,12 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
         return false;
     }
 
+    private boolean supportsManualSensor() {
+        return characteristics != null && contains(
+                characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES),
+                CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR);
+    }
+
     /** Minimize ISP and sensor pipeline work. Only applies settings the camera advertises. */
     private void applyLowPowerSettings(@NonNull CaptureRequest.Builder builder) {
         final var c = characteristics;
@@ -577,11 +815,7 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
             return;
         }
 
-        final int[] caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-        final boolean manualSensor = contains(caps,
-                CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR);
-
-        if (manualSensor) {
+        if (supportsManualSensor()) {
             builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_OFF);
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
 
@@ -620,21 +854,81 @@ public class TorchSession implements PowerManager.OnThermalStatusChangedListener
             builder.set(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
                     CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_OFF);
         }
-        builder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE,
-                CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF);
+        if (contains(c.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES),
+                CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF)) {
+            builder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE,
+                    CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF);
+        }
     }
 
     private void notifyTorchState() {
         if (cameraId != null) {
-            for (final var listener : listeners) {
+            // Copy, since listeners may unregister themselves in response.
+            for (final var listener : listeners.toArray(new Listener[0])) {
                 listener.onTorchStateChanged(curBrightness, maxBrightness);
             }
         }
     }
 
     private void notifyTorchError(@NonNull TorchError error) {
-        for (final var listener : listeners) {
+        for (final var listener : listeners.toArray(new Listener[0])) {
             listener.onTorchError(error);
+        }
+    }
+
+    private class CameraCallback extends CameraDevice.StateCallback {
+        private final int generation;
+
+        CameraCallback(int generation) {
+            this.generation = generation;
+        }
+
+        @Override
+        public void onOpened(@NonNull CameraDevice camera) {
+            mainHandler.post(() -> onCameraOpened(generation, camera));
+        }
+
+        @Override
+        public void onDisconnected(@NonNull CameraDevice camera) {
+            mainHandler.post(() -> onCameraClosed(generation, camera));
+        }
+
+        @Override
+        public void onError(@NonNull CameraDevice camera, int error) {
+            mainHandler.post(() -> onCameraError(generation, camera, error));
+        }
+    }
+
+    private class SessionCallback extends CameraCaptureSession.StateCallback {
+        private final int generation;
+
+        SessionCallback(int generation) {
+            this.generation = generation;
+        }
+
+        @Override
+        public void onConfigured(@NonNull CameraCaptureSession session) {
+            mainHandler.post(() -> onSessionConfigured(generation, session));
+        }
+
+        @Override
+        public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+            mainHandler.post(() -> onSessionConfigureFailed(generation, session));
+        }
+    }
+
+    private class CaptureCallback extends CameraCaptureSession.CaptureCallback {
+        private final int generation;
+
+        CaptureCallback(int generation) {
+            this.generation = generation;
+        }
+
+        @Override
+        public void onCaptureFailed(@NonNull CameraCaptureSession session,
+                                    @NonNull CaptureRequest request,
+                                    @NonNull CaptureFailure failure) {
+            mainHandler.post(() -> onCaptureFailedMain(generation));
         }
     }
 

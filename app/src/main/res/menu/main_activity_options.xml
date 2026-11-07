@@ -12,4 +12,10 @@
     <item android:id="@+id/boost_timeout"
         android:title="@string/menu_boost_timeout"
         android:checkable="true" />
+    <item android:id="@+id/haptics"
+        android:title="@string/menu_haptics"
+        android:checkable="true" />
+    <item android:id="@+id/volume_keys"
+        android:title="@string/menu_volume_keys"
+        android:checkable="true" />
 </menu>
